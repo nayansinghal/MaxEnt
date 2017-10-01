@@ -67,7 +67,29 @@ def calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features):
     """
     n_states = np.shape(trans_mat)[0]
     n_actions = np.shape(trans_mat)[1]
+
+    Value = np.nan_to_num(np.ones((n_states, 1))*float("-inf"))
+    diff = np.ones((n_states, 1))
+    discount = 0.01
+
+    while (diff > 1e-4).all():
+        new_Value = Value;
+        for action in range(n_actions):
+            for states in range(n_states):
+                new_Value[states] = max(new_Value[states], np.dot(r_weights, state_features[states]) + discount* np.sum(trans_mat[states, action, states_new]*Value[states_new] for states_new in range(n_states)))
+
+        diff = abs(Value-new_Value)
+        Value = new_Value
+
     policy = np.zeros((n_states, n_actions))
+    for state in range(n_states):
+        for action in range(n_actions):
+            p = np.array([trans_mat[state, action, new_state] for new_state in range(n_states)])
+            policy[state, action] = p.dot(np.dot(r_weights, state_features[states]) + discount * Value)
+
+    # Softmax by row to interpret these values as probabilities.
+    policy -= policy.max(axis=1).reshape((n_states, 1))  # For numerical stability.
+    policy = np.exp(policy)/np.exp(policy).sum(axis=1).reshape((n_states, 1))
     return policy
 
 
@@ -100,7 +122,7 @@ def find_feature_expectations(state_features, demos):
         for state in demo:
             feature_expectations += state_features[state]
 
-    return feature_expectations/np.array(demos).shape[0]
+    return feature_expectations/np.shape(demos)[0]
 
 def maxEntIRL(trans_mat, state_features, demos, seed_weights, n_epochs, horizon, learning_rate):
     """
@@ -116,7 +138,7 @@ def maxEntIRL(trans_mat, state_features, demos, seed_weights, n_epochs, horizon,
 
     return: a size F array of reward weights
     """
-    print find_feature_expectations(state_features, demos)
+    feature_expectations = find_feature_expectations(state_features, demos)
 
     n_features = np.shape(state_features)[1]
     r_weights = np.zeros(n_features)
