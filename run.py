@@ -3,7 +3,7 @@ import numpy.random as rand
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 import matplotlib.pyplot as plt
 from matplotlib import cm
-
+from itertools import product
 
 def build_trans_mat_gridworld():
     # 5x5 gridworld laid out like:
@@ -104,8 +104,15 @@ def calcExpectedStateFreq(trans_mat, horizon, start_dist, policy):
 
     return: a size S array of expected state visitation frequencies
     """
+    n_states = np.shape(trans_mat)[0]
+    n_actions = np.shape(trans_mat)[1]
 
-    state_freq = np.zeros(len(start_dist))
+    expected_svf = np.tile(start_dist, (horizon,1)).T
+    for time in range(1, horizon):
+        for state, action, new_state in product(range(n_states), range(n_actions), range(n_states)):
+            expected_svf[new_state, time] += (expected_svf[state, time-1]* policy[state, action]* trans_mat[state, action, new_state])
+
+    state_freq = expected_svf.sum(axis=1)
     return state_freq
 
 def find_feature_expectations(state_features, demos):
@@ -140,8 +147,23 @@ def maxEntIRL(trans_mat, state_features, demos, seed_weights, n_epochs, horizon,
     """
     feature_expectations = find_feature_expectations(state_features, demos)
 
+    n_states = np.shape(trans_mat)[0]
+    n_actions = np.shape(trans_mat)[1]
+
     n_features = np.shape(state_features)[1]
-    r_weights = np.zeros(n_features)
+    r_weights = np.zeros(n_features) + seed_weights
+    for i in range(n_epochs):
+
+        policy = calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features)
+
+        start_state_count = np.zeros(n_states)
+        for demo in demos:
+            start_state_count[demo[0]] += 1
+            p_start_dist = start_state_count/np.shape(demos)[0]
+
+        expected_svf = calcExpectedStateFreq(trans_mat, horizon, p_start_dist, policy)
+        gradient = feature_expectations - expected_svf.T.dot(state_features)
+        r_weights += learning_rate * gradient
     return r_weights
 
 
@@ -169,6 +191,7 @@ if __name__ == '__main__':
     reward_fxn = np.reshape(reward_fxn, (5, 5))
 
     # Plot reward function
+    plt.close("all")
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     X = np.arange(0, 5, 1)
