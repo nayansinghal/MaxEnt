@@ -191,8 +191,8 @@ def maxEntIRL(trans_mat, state_features, demos, seed_weights, n_epochs, horizon,
     n_features = np.shape(state_features)[1]
     r_weights = np.zeros(n_features) + seed_weights
     for i in range(n_epochs):
-
-        policy = calcValueIterationPolicy(trans_mat, horizon, r_weights, state_features)
+        print("i: {}".format(i))
+        policy = calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features)
 
         start_state_count = np.zeros(n_states)
         for demo in demos:
