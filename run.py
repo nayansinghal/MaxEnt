@@ -54,7 +54,7 @@ def build_trans_mat_gridworld():
     return trans_mat
 
 
-def calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features):
+def calcValueIterationPolicy(trans_mat, horizon, r_weights, state_features):
     """
     For a given reward function and horizon, calculate the MaxEnt policy that gives equal weight to equal reward trajectories
 
@@ -92,6 +92,44 @@ def calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features):
     policy = np.exp(policy)/np.exp(policy).sum(axis=1).reshape((n_states, 1))
     return policy
 
+def calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features):
+    """
+    For a given reward function and horizon, calculate the MaxEnt policy that gives equal weight to equal reward trajectories
+
+    trans_mat: an S x A x S' array of transition probabilites from state s to s' if action a is taken
+    horizon: the finite time horizon (int) of the problem for calculating state frequencies
+    r_weights: a size F array of the weights of the current reward function to evaluate
+    state_features: an S x F array that lists F feature values for each state in S
+
+    return: an S x A policy in which each entry is the probability of taking action a in state s
+    """
+    n_states = np.shape(trans_mat)[0]
+    n_actions = np.shape(trans_mat)[1]
+
+    partition = np.zeros((n_states, 1))
+    policy = np.zeros((n_states, n_actions))
+
+    partition[n_states-1] = 1
+    diff = np.ones((n_states, 1))
+
+    while (diff > 1e-4).all():
+        new_partition = partition
+        for state in range(n_states):
+            for action in range(n_actions):
+                p = np.array([trans_mat[state, action, new_state]*np.exp(np.dot(r_weights, state_features[state]))*partition[new_state] for new_state in range(n_states)])
+                policy[state, action] = np.sum(p)
+            new_partition[state] = np.sum(policy[state, :])
+            if state == n_states-1:
+                new_partition[state] += 1
+        diff = abs(partition - new_partition)
+        partition = new_partition
+
+
+    for state in range(n_states):
+        for action in range(n_actions):
+            if partition[state] != 0.0:
+                policy[state, action] = policy[state, action] / partition[state]
+    return policy
 
 def calcExpectedStateFreq(trans_mat, horizon, start_dist, policy):
     """
@@ -154,7 +192,7 @@ def maxEntIRL(trans_mat, state_features, demos, seed_weights, n_epochs, horizon,
     r_weights = np.zeros(n_features) + seed_weights
     for i in range(n_epochs):
 
-        policy = calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features)
+        policy = calcValueIterationPolicy(trans_mat, horizon, r_weights, state_features)
 
         start_state_count = np.zeros(n_states)
         for demo in demos:
