@@ -112,6 +112,7 @@ def calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features):
     partition[n_states-1] = 1
     diff = np.ones((n_states, 1))
 
+    # Calculate partition function for each state and policy value for (state,action)
     while (diff > 1e-4).all():
         new_partition = partition
         for state in range(n_states):
@@ -125,10 +126,12 @@ def calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features):
         partition = new_partition
 
 
+    # Local action probability computation
     for state in range(n_states):
         for action in range(n_actions):
             if partition[state] != 0.0:
                 policy[state, action] = policy[state, action] / partition[state]
+
     return policy
 
 def calcExpectedStateFreq(trans_mat, horizon, start_dist, policy):
@@ -145,7 +148,10 @@ def calcExpectedStateFreq(trans_mat, horizon, start_dist, policy):
     n_states = np.shape(trans_mat)[0]
     n_actions = np.shape(trans_mat)[1]
 
+    # Copy start_dist for complete horizon
     expected_svf = np.tile(start_dist, (horizon,1)).T
+
+    # Calculate Expected State Frequency for (state, time) pair
     for time in range(1, horizon):
         for state, action, new_state in product(range(n_states), range(n_actions), range(n_states)):
             expected_svf[new_state, time] += (expected_svf[state, time-1]* policy[state, action]* trans_mat[state, action, new_state])
@@ -155,19 +161,20 @@ def calcExpectedStateFreq(trans_mat, horizon, start_dist, policy):
 
 def find_feature_expectations(state_features, demos):
     """
-    Compute expected feature expectations from demonstraton trajectories
+    Compute expected feature expectations from demonstration trajectories
 
-    :param state_features:
-    :param demos:
+    :param state_features: an S x F array that lists F feature values for each state in S
+    :param demos: a list of lists containing D demos of varying lengths, where each demo is series of states (ints)
     :return: expected feature expectation vector of size (state_features x 1)
     """
 
-    feature_expectations = np.zeros(state_features.shape[1])
+    feature_exp = np.zeros(state_features.shape[1])
     for demo in demos:
         for state in demo:
-            feature_expectations += state_features[state]
+            feature_exp += state_features[state]
 
-    return feature_expectations/np.shape(demos)[0]
+    # Expected feature_exp
+    return feature_exp/np.shape(demos)[0]
 
 def maxEntIRL(trans_mat, state_features, demos, seed_weights, n_epochs, horizon, learning_rate):
     """
@@ -183,25 +190,34 @@ def maxEntIRL(trans_mat, state_features, demos, seed_weights, n_epochs, horizon,
 
     return: a size F array of reward weights
     """
-    feature_expectations = find_feature_expectations(state_features, demos)
+    feature_exp = find_feature_expectations(state_features, demos)
 
     n_states = np.shape(trans_mat)[0]
     n_actions = np.shape(trans_mat)[1]
 
     n_features = np.shape(state_features)[1]
     r_weights = np.zeros(n_features) + seed_weights
+
+    # Iterate
     for i in range(n_epochs):
         print("i: {}".format(i))
+
+        # Calculate Max Ent Policy
         policy = calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features)
 
+        # Probability for initial state trajectories
         start_state_count = np.zeros(n_states)
         for demo in demos:
             start_state_count[demo[0]] += 1
             p_start_dist = start_state_count/np.shape(demos)[0]
 
+        # Calculate Expected State Frequency
         expected_svf = calcExpectedStateFreq(trans_mat, horizon, p_start_dist, policy)
-        gradient = feature_expectations - expected_svf.T.dot(state_features)
+
+        # Update reward weights using gradient
+        gradient = feature_exp - expected_svf.T.dot(state_features)
         r_weights += learning_rate * gradient
+
     return r_weights
 
 
@@ -216,7 +232,7 @@ if __name__ == '__main__':
 
     # Parameters
     n_epochs = 100
-    horizon = 10
+    horizon = 100
     learning_rate = 1.0
 
     # Main algorithm call
