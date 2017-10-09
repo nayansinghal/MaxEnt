@@ -53,48 +53,10 @@ def build_trans_mat_gridworld():
 
 	return trans_mat
 
-
-def calcValueIterationPolicy(trans_mat, horizon, r_weights, state_features):
-	"""
-	For a given reward function and horizon, calculate the MaxEnt policy that gives equal weight to equal reward trajectories
-
-	trans_mat: an S x A x S' array of transition probabilites from state s to s' if action a is taken
-	horizon: the finite time horizon (int) of the problem for calculating state frequencies
-	r_weights: a size F array of the weights of the current reward function to evaluate
-	state_features: an S x F array that lists F feature values for each state in S
-
-	return: an S x A policy in which each entry is the probability of taking action a in state s
-	"""
-	n_states = np.shape(trans_mat)[0]
-	n_actions = np.shape(trans_mat)[1]
-
-	Value = np.nan_to_num(np.ones((n_states, 1))*float("-inf"))
-	diff = np.ones((n_states, 1))
-	discount = 0.01
-
-	while (diff > 1e-4).all():
-		new_Value = Value;
-		for action in range(n_actions):
-			for states in range(n_states):
-				new_Value[states] = max(new_Value[states], np.dot(r_weights, state_features[states]) + discount* np.sum(trans_mat[states, action, states_new]*Value[states_new] for states_new in range(n_states)))
-
-		diff = abs(Value-new_Value)
-		Value = new_Value
-
-	policy = np.zeros((n_states, n_actions))
-	for state in range(n_states):
-		for action in range(n_actions):
-			p = np.array([trans_mat[state, action, new_state] for new_state in range(n_states)])
-			policy[state, action] = p.dot(np.dot(r_weights, state_features[states]) + discount * Value)
-
-	# Softmax by row to interpret these values as probabilities.
-	policy -= policy.max(axis=1).reshape((n_states, 1))  # For numerical stability.
-	policy = np.exp(policy)/np.exp(policy).sum(axis=1).reshape((n_states, 1))
-	return policy
-
 def calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features):
 	"""
-	For a given reward function and horizon, calculate the MaxEnt policy that gives equal weight to equal reward trajectories
+	For a given reward function and horizon, calculate the MaxEnt policy that gives equal weight to equal reward trajectorie
+	\s
 
 	trans_mat: an S x A x S' array of transition probabilites from state s to s' if action a is taken
 	horizon: the finite time horizon (int) of the problem for calculating state frequencies
@@ -110,19 +72,18 @@ def calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features):
 	policy = np.zeros((n_states, n_actions))
 
 	partition[n_states-1] = 1
-	diff = np.ones((n_states, 1))
+	reward = np.exp(np.dot(r_weights, state_features.T))
 
 	# Calculate partition function for each state and policy value for (state,action)
 	for i in range(horizon):
 		new_partition = partition
 		for state in range(n_states):
 			for action in range(n_actions):
-				p = np.array([trans_mat[state, action, new_state]*np.exp(np.dot(r_weights, state_features[state]))*partition[new_state] for new_state in range(n_states)])
+				p = np.array([trans_mat[state, action, new_state]*reward[state]*partition[new_state] for new_state in range(n_states)])
 				policy[state, action] = np.sum(p)
 			new_partition[state] = np.sum(policy[state, :])
 			if state == n_states-1:
-				new_partition[state] += 1
-		diff = abs(partition - new_partition)
+				new_partition[state] = 1
 		partition = new_partition
 
 
@@ -148,15 +109,16 @@ def calcExpectedStateFreq(trans_mat, horizon, start_dist, policy):
 	n_states = np.shape(trans_mat)[0]
 	n_actions = np.shape(trans_mat)[1]
 
-	# Copy start_dist for complete horizon
-	expected_svf = np.tile(start_dist, (horizon,1)).T
+	# Copy start_dist for complete horizon, states x horizon
+	exp_svf = np.zeros((n_states, horizon))
+	exp_svf[0,0] = 1.0
 
 	# Calculate Expected State Frequency for (state, time) pair
 	for time in range(1, horizon):
 		for state, action, new_state in product(range(n_states), range(n_actions), range(n_states)):
-			expected_svf[new_state, time] += (expected_svf[state, time-1]* policy[state, action]* trans_mat[state, action, new_state])
+			exp_svf[new_state, time] += (exp_svf[state, time-1]* policy[state, action]* trans_mat[state, action, new_state])
 
-	state_freq = expected_svf.sum(axis=1)
+	state_freq = exp_svf.sum(axis=1)
 	return state_freq
 
 def find_feature_expectations(state_features, demos):
@@ -198,18 +160,18 @@ def maxEntIRL(trans_mat, state_features, demos, seed_weights, n_epochs, horizon,
 	n_features = np.shape(state_features)[1]
 	r_weights = np.zeros(n_features) + seed_weights
 
+	# Probability for initial state trajectories
+	start_state_count = np.zeros(n_states)
+	for demo in demos:
+		start_state_count[demo[0]] += 1
+		p_start_dist = start_state_count / np.shape(demos)[0]
+
 	# Iterate
-	for i in range(n_epochs):
-		print("i: {}".format(i))
+	for epoch in range(n_epochs):
+		# print("epoch: {}".format(epoch))
 
 		# Calculate Max Ent Policy
 		policy = calcMaxEntPolicy(trans_mat, horizon, r_weights, state_features)
-
-		# Probability for initial state trajectories
-		start_state_count = np.zeros(n_states)
-		for demo in demos:
-			start_state_count[demo[0]] += 1
-			p_start_dist = start_state_count/np.shape(demos)[0]
 
 		# Calculate Expected State Frequency
 		expected_svf = calcExpectedStateFreq(trans_mat, horizon, p_start_dist, policy)
@@ -217,7 +179,10 @@ def maxEntIRL(trans_mat, state_features, demos, seed_weights, n_epochs, horizon,
 		# Update reward weights using gradient
 		gradient = feature_exp - expected_svf.T.dot(state_features)
 		r_weights += learning_rate * gradient
+		print epoch, np.linalg.norm(gradient)
 
+	print policy
+	print policy.argmax(axis=1)
 	return r_weights
 
 
@@ -242,8 +207,17 @@ if __name__ == '__main__':
 	reward_fxn = []
 	for s_i in range(25):
 		reward_fxn.append(np.dot(r_weights, state_features[s_i]))
-	reward_fxn[0] = 0
+	reward = []
+	for demo in demos:
+
+		sum = 0.0
+		for i in demo:
+			if i != 25:
+				sum += reward_fxn[i]
+		reward.append(sum)
+	print reward
 	reward_fxn = np.reshape(reward_fxn, (5, 5))
+	print 'reward function', reward_fxn
 
 	# Plot reward function
 	plt.close("all")
